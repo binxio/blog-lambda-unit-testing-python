@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: lambda-inlined
+
+Resources:
+  AmazonAPIGatewayInvokeFullAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: apigateway.amazonaws.com
+          Action: sts:AssumeRole
+          Condition: {}
+      Path: /
+      Policies:
+      - PolicyName: ApiGateway
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - lambda:InvokeFunction
+            Resource:
+            - '*'
+
+  LambdaBasicExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+          Condition: {}
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/AWSXrayFullAccess
+
+  PythonFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PythonFunction
+      Description: Python Function Handler
+      Handler: index.handler
+      Runtime: python3.6
+      Role: !GetAtt LambdaBasicExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          def handler(event, context):
+          	response = {
+          		'statusCode': 200,
+          		'body': json.dumps('Hello Python')
+          	}
+          	return response
+
+  ApiGatewayApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Body:
+        swagger: '2.0'
+        info:
+          description: Lambda Integration Example
+          title: !Ref AWS::StackName
+          version: 1.0.0
+        schemes:
+        - https
+        paths:
+          /python:
+            get:
+              x-amazon-apigateway-integration:
+                responses: {}
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PythonFunction.Arn}/invocations
+                credentials: !GetAtt AmazonAPIGatewayInvokeFullAccessRole.Arn
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                type: aws_proxy
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref ApiGatewayApi
+      StageName: dev
+
+Outputs:
+  PythonServiceEndpoint:
+    Description: API Endpoint
+    Value: !Sub https://${ApiGatewayApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/dev/python
